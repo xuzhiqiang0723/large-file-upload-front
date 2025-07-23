@@ -54,6 +54,7 @@ interface NetworkStats {
   lastMeasureBytes: number;
   speedHistory: number[]; // 最近10次的速度记录
   chunkSpeeds: number[]; // 分片上传速度记录
+  speedTimerId: number | null; // 速度测量定时器ID
 }
 
 interface CheckUploadResponse {
@@ -136,6 +137,7 @@ export function useUpload(options: UploadOptions = {}) {
     lastMeasureBytes: 0,
     speedHistory: [],
     chunkSpeeds: [],
+    speedTimerId: null,
   });
 
   // 新增状态
@@ -195,53 +197,88 @@ export function useUpload(options: UploadOptions = {}) {
     }
   };
 
-  // 更新网络速度统计
-  const updateNetworkStats = (uploadedBytes: number) => {
-    const now = Date.now();
-
-    if (networkStats.startTime === 0) {
-      networkStats.startTime = now;
-      networkStats.lastMeasureTime = now;
-      networkStats.lastMeasureBytes = uploadedBytes;
-      return;
+  // 计算当前实际上传的字节数
+  const calculateActualUploadedBytes = (): number => {
+    let totalUploaded = 0;
+    
+    for (const chunk of chunks.value) {
+      if (chunk.uploaded) {
+        // 已完成的分片
+        totalUploaded += chunk.end - chunk.start;
+      } else if (chunk.progress > 0) {
+        // 正在上传的分片，根据进度计算
+        const chunkSize = chunk.end - chunk.start;
+        totalUploaded += (chunkSize * chunk.progress) / 100;
+      }
     }
+    
+    return Math.floor(totalUploaded);
+  };
 
-    const timeDiff = now - networkStats.lastMeasureTime;
-    if (timeDiff >= 1000) {
-      // 每秒更新一次
-      const bytesDiff = uploadedBytes - networkStats.lastMeasureBytes;
+  // 启动速度测量定时器
+  const startSpeedMeasurement = () => {
+    if (networkStats.speedTimerId) {
+      clearInterval(networkStats.speedTimerId);
+    }
+    
+    const now = Date.now();
+    networkStats.startTime = now;
+    networkStats.lastMeasureTime = now;
+    networkStats.lastMeasureBytes = 0;
+    
+    // 每秒测量一次速度
+    networkStats.speedTimerId = window.setInterval(() => {
+      const currentTime = Date.now();
+      const currentBytes = calculateActualUploadedBytes();
+      
+      const timeDiff = currentTime - networkStats.lastMeasureTime;
+      const bytesDiff = currentBytes - networkStats.lastMeasureBytes;
+      
+      // 计算当前速度 (bytes/second)
       const currentSpeed = bytesDiff / (timeDiff / 1000);
-
-      // 更新当前速度
+      
+      // 更新速度信息
       speedInfo.current = currentSpeed;
-      speedInfo.lastUpdate = now;
-
-      // 更新速度历史
+      speedInfo.lastUpdate = currentTime;
+      
+      // 更新速度历史，保持最近10次记录
       networkStats.speedHistory.push(currentSpeed);
       if (networkStats.speedHistory.length > 10) {
         networkStats.speedHistory.shift();
       }
-
-      // 计算平均速度
-      const totalTime = (now - networkStats.startTime) / 1000;
-      speedInfo.average = totalTime > 0 ? uploadedBytes / totalTime : 0;
-
+      
+      // 计算平均速度（从开始上传到现在的总平均）
+      const totalTime = (currentTime - networkStats.startTime) / 1000;
+      speedInfo.average = totalTime > 0 ? currentBytes / totalTime : 0;
+      
       // 更新峰值速度
       if (currentSpeed > speedInfo.peak) {
         speedInfo.peak = currentSpeed;
       }
-
-      networkStats.lastMeasureTime = now;
-      networkStats.lastMeasureBytes = uploadedBytes;
-
+      
+      // 更新测量基准
+      networkStats.lastMeasureTime = currentTime;
+      networkStats.lastMeasureBytes = currentBytes;
+      
       console.log(
-        `📈 网络速度 - 当前: ${formatSpeed(currentSpeed)}, 平均: ${formatSpeed(speedInfo.average)}, 峰值: ${formatSpeed(speedInfo.peak)}`,
+        `📈 固定间隔网络速度 - 当前: ${formatSpeed(currentSpeed)}, 平均: ${formatSpeed(speedInfo.average)}, 峰值: ${formatSpeed(speedInfo.peak)}`,
       );
+    }, 1000);
+  };
+
+  // 停止速度测量定时器
+  const stopSpeedMeasurement = () => {
+    if (networkStats.speedTimerId) {
+      clearInterval(networkStats.speedTimerId);
+      networkStats.speedTimerId = null;
     }
   };
 
   // 重置网络统计
   const resetNetworkStats = () => {
+    // 停止速度测量定时器
+    stopSpeedMeasurement();
+    
     speedInfo.current = 0;
     speedInfo.average = 0;
     speedInfo.peak = 0;
@@ -530,10 +567,7 @@ export function useUpload(options: UploadOptions = {}) {
         xhr.upload.addEventListener('progress', (event) => {
           if (event.lengthComputable) {
             chunk.progress = Math.round((event.loaded / event.total) * 100);
-
-            // 更新总体进度和网络速度
-            const currentUploaded = uploadedSize.value + event.loaded;
-            updateNetworkStats(currentUploaded);
+            // 更新总体进度（速度计算现在由定时器处理）
             updateTotalProgress();
           }
         });
@@ -741,6 +775,9 @@ export function useUpload(options: UploadOptions = {}) {
       // 重置网络统计
       resetNetworkStats();
       networkStats.totalBytes = currentFile.value.size;
+      
+      // 启动速度测量定时器
+      startSpeedMeasurement();
 
       isUploading.value = true;
       isCompleted.value = false;
@@ -780,6 +817,8 @@ export function useUpload(options: UploadOptions = {}) {
         if (mergeResult.success) {
           isCompleted.value = true;
           isUploading.value = false;
+          // 上传完成时停止速度测量
+          stopSpeedMeasurement();
           return mergeResult.url || null;
         } else {
           throw new Error(mergeResult.message || '合并失败');
@@ -797,6 +836,8 @@ export function useUpload(options: UploadOptions = {}) {
       if (mergeResult.success) {
         isCompleted.value = true;
         isUploading.value = false;
+        // 上传完成时停止速度测量
+        stopSpeedMeasurement();
 
         // 打印最终统计信息
         console.log('=== 上传统计信息 ===');
@@ -813,6 +854,8 @@ export function useUpload(options: UploadOptions = {}) {
     } catch (error) {
       console.error('=== 上传流程失败 ===', error);
       isUploading.value = false;
+      // 上传失败时停止速度测量
+      stopSpeedMeasurement();
       throw error;
     }
   };
@@ -823,6 +866,8 @@ export function useUpload(options: UploadOptions = {}) {
   const pauseUpload = () => {
     console.log('暂停上传');
     isPaused.value = true;
+    // 暂停时停止速度测量
+    stopSpeedMeasurement();
   };
 
   /**
@@ -836,6 +881,9 @@ export function useUpload(options: UploadOptions = {}) {
     console.log('恢复上传');
     isPaused.value = false;
     isUploading.value = true;
+    
+    // 恢复时重新启动速度测量
+    startSpeedMeasurement();
 
     try {
       // 继续上传剩余分片
@@ -847,12 +895,16 @@ export function useUpload(options: UploadOptions = {}) {
       if (mergeResult.success) {
         isCompleted.value = true;
         isUploading.value = false;
+        // 上传完成时停止速度测量
+        stopSpeedMeasurement();
         return mergeResult.url || null;
       } else {
         throw new Error(mergeResult.message || '合并失败');
       }
     } catch (error) {
       isUploading.value = false;
+      // 上传失败时停止速度测量
+      stopSpeedMeasurement();
       throw error;
     }
   };
@@ -866,6 +918,8 @@ export function useUpload(options: UploadOptions = {}) {
     isUploading.value = false;
     isCalculatingHash.value = false;
     isCheckingUpload.value = false;
+    // 取消时停止速度测量
+    stopSpeedMeasurement();
     resetNetworkStats();
   };
 

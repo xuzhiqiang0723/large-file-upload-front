@@ -61,6 +61,7 @@ interface S3NetworkStats {
   lastMeasureTime: number
   lastMeasureBytes: number
   speedHistory: number[]
+  speedTimerId: number | null // 速度测量定时器ID
 }
 
 interface S3CheckUploadResponse {
@@ -127,7 +128,8 @@ export function useS3Upload(options: S3UploadOptions = {}) {
     startTime: 0,
     lastMeasureTime: 0,
     lastMeasureBytes: 0,
-    speedHistory: []
+    speedHistory: [],
+    speedTimerId: null
   })
 
   const isSecondTransfer = ref(false)
@@ -201,43 +203,87 @@ export function useS3Upload(options: S3UploadOptions = {}) {
     })
   }
 
-  // 网络速度统计
-  const updateNetworkStats = (uploadedBytes: number) => {
-    const now = Date.now()
-
-    if (networkStats.startTime === 0) {
-      networkStats.startTime = now
-      networkStats.lastMeasureTime = now
-      networkStats.lastMeasureBytes = uploadedBytes
-      return
+  // 计算当前实际上传的字节数
+  const calculateActualUploadedBytes = (): number => {
+    let totalUploaded = 0
+    
+    for (const chunk of chunks.value) {
+      if (chunk.uploaded) {
+        // 已完成的分片
+        totalUploaded += chunk.end - chunk.start
+      } else if (chunk.progress > 0) {
+        // 正在上传的分片，根据进度计算
+        const chunkSize = chunk.end - chunk.start
+        totalUploaded += (chunkSize * chunk.progress) / 100
+      }
     }
+    
+    return Math.floor(totalUploaded)
+  }
 
-    const timeDiff = now - networkStats.lastMeasureTime
-    if (timeDiff >= 1000) {
-      const bytesDiff = uploadedBytes - networkStats.lastMeasureBytes
+  // 启动速度测量定时器
+  const startSpeedMeasurement = () => {
+    if (networkStats.speedTimerId) {
+      clearInterval(networkStats.speedTimerId)
+    }
+    
+    const now = Date.now()
+    networkStats.startTime = now
+    networkStats.lastMeasureTime = now
+    networkStats.lastMeasureBytes = 0
+    
+    // 每秒测量一次速度
+    networkStats.speedTimerId = window.setInterval(() => {
+      const currentTime = Date.now()
+      const currentBytes = calculateActualUploadedBytes()
+      
+      const timeDiff = currentTime - networkStats.lastMeasureTime
+      const bytesDiff = currentBytes - networkStats.lastMeasureBytes
+      
+      // 计算当前速度 (bytes/second)
       const currentSpeed = bytesDiff / (timeDiff / 1000)
-
+      
+      // 更新速度信息
       speedInfo.current = currentSpeed
-      speedInfo.lastUpdate = now
-
+      speedInfo.lastUpdate = currentTime
+      
+      // 更新速度历史，保持最近10次记录
       networkStats.speedHistory.push(currentSpeed)
       if (networkStats.speedHistory.length > 10) {
         networkStats.speedHistory.shift()
       }
-
-      const totalTime = (now - networkStats.startTime) / 1000
-      speedInfo.average = totalTime > 0 ? uploadedBytes / totalTime : 0
-
+      
+      // 计算平均速度（从开始上传到现在的总平均）
+      const totalTime = (currentTime - networkStats.startTime) / 1000
+      speedInfo.average = totalTime > 0 ? currentBytes / totalTime : 0
+      
+      // 更新峰值速度
       if (currentSpeed > speedInfo.peak) {
         speedInfo.peak = currentSpeed
       }
+      
+      // 更新测量基准
+      networkStats.lastMeasureTime = currentTime
+      networkStats.lastMeasureBytes = currentBytes
+      
+      console.log(
+        `📈 S3固定间隔网络速度 - 当前: ${formatSpeed(currentSpeed)}, 平均: ${formatSpeed(speedInfo.average)}, 峰值: ${formatSpeed(speedInfo.peak)}`
+      )
+    }, 1000)
+  }
 
-      networkStats.lastMeasureTime = now
-      networkStats.lastMeasureBytes = uploadedBytes
+  // 停止速度测量定时器
+  const stopSpeedMeasurement = () => {
+    if (networkStats.speedTimerId) {
+      clearInterval(networkStats.speedTimerId)
+      networkStats.speedTimerId = null
     }
   }
 
   const resetNetworkStats = () => {
+    // 停止速度测量定时器
+    stopSpeedMeasurement()
+    
     speedInfo.current = 0
     speedInfo.average = 0
     speedInfo.peak = 0
@@ -582,9 +628,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
         xhr.upload.addEventListener('progress', event => {
           if (event.lengthComputable && !chunk.abortController?.signal.aborted) {
             chunk.progress = Math.round((event.loaded / event.total) * 100)
-
-            const currentUploaded = uploadedSize.value + event.loaded
-            updateNetworkStats(currentUploaded)
+            // 更新总体进度（速度计算现在由定时器处理）
             updateTotalProgress()
           }
         })
@@ -800,6 +844,9 @@ export function useS3Upload(options: S3UploadOptions = {}) {
       resetNetworkStats()
       networkStats.totalBytes = currentFile.value.size
 
+      // 启动速度测量定时器
+      startSpeedMeasurement()
+
       isUploading.value = true
       isCompleted.value = false
       isPaused.value = false
@@ -829,6 +876,8 @@ export function useS3Upload(options: S3UploadOptions = {}) {
         const result = await completeUpload()
         isCompleted.value = true
         isUploading.value = false
+        // 上传完成时停止速度测量
+        stopSpeedMeasurement()
         return result
       }
 
@@ -839,12 +888,16 @@ export function useS3Upload(options: S3UploadOptions = {}) {
       const result = await completeUpload()
       isCompleted.value = true
       isUploading.value = false
+      // 上传完成时停止速度测量
+      stopSpeedMeasurement()
 
       console.log('=== S3上传流程完成 ===')
       return result
     } catch (error) {
       console.error('=== S3上传流程失败 ===', error)
       isUploading.value = false
+      // 上传失败时停止速度测量
+      stopSpeedMeasurement()
       throw error
     }
   }
@@ -853,6 +906,9 @@ export function useS3Upload(options: S3UploadOptions = {}) {
   const pauseUpload = async () => {
     console.log('暂停S3上传')
     isPaused.value = true
+    
+    // 暂停时停止速度测量
+    stopSpeedMeasurement()
 
     // 中止所有正在进行的分片上传
     for (const chunk of chunks.value) {
@@ -879,6 +935,9 @@ export function useS3Upload(options: S3UploadOptions = {}) {
     isPaused.value = false
     isUploading.value = true
 
+    // 恢复时重新启动速度测量
+    startSpeedMeasurement()
+
     // 清除执行中的分片记录（这些分片可能因为暂停而中断了）
     executingChunks.value.clear()
 
@@ -899,14 +958,20 @@ export function useS3Upload(options: S3UploadOptions = {}) {
         const result = await completeUpload()
         isCompleted.value = true
         isUploading.value = false
+        // 上传完成时停止速度测量
+        stopSpeedMeasurement()
         return result
       } else {
         // 如果还有未完成的分片但没有在上传，可能是因为再次暂停
         isUploading.value = false
+        // 如果未完成则停止速度测量
+        stopSpeedMeasurement()
         return null
       }
     } catch (error) {
       isUploading.value = false
+      // 上传失败时停止速度测量
+      stopSpeedMeasurement()
       throw error
     }
   }
@@ -918,6 +983,9 @@ export function useS3Upload(options: S3UploadOptions = {}) {
     isUploading.value = false
     isCalculatingHash.value = false
     isCheckingUpload.value = false
+
+    // 取消时停止速度测量
+    stopSpeedMeasurement()
 
     // 中止所有正在进行的分片上传
     for (const chunk of chunks.value) {

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import s3FileUpload from './components/s3-file-upload/index.vue'
+import localFileUpload from './components/local-file-upload/index.vue'
 </script>
 
 <template>
   <div style="width: 1000px">
-    <s3-file-upload />
+    <local-file-upload />
   </div>
 </template>
 
