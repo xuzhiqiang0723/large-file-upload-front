@@ -67,8 +67,16 @@ interface S3CheckUploadResponse {
   success: boolean
   fileExists: boolean
   isComplete: boolean
+  shouldUpload?: boolean
   message: string
   url?: string
+  storage?: string
+  uploadedChunks?: string[]
+  resumeInfo?: {
+    uploadedCount: number
+    totalChunks: number
+    progress: number
+  }
   session?: S3UploadSession
 }
 
@@ -352,16 +360,40 @@ export function useS3Upload(options: S3UploadOptions = {}) {
         isSecondTransfer.value = true
         isCompleted.value = true
         return result
-      } else if (result.session) {
+      } else if (result.resumeInfo && result.shouldUpload) {
         // 发现断点续传会话
         console.log('🔄 发现S3断点续传会话')
+        
+        // 创建或更新会话信息，使用resumeInfo数据
+        const sessionInfo: S3UploadSession = {
+          sessionId: fileHash.value, // 使用文件哈希作为会话ID
+          uploadId: fileHash.value, // 临时使用文件哈希，应该从后端获取真实的uploadId
+          objectName: currentFile.value.name,
+          fileName: currentFile.value.name,
+          fileSize: currentFile.value.size,
+          totalChunks: result.resumeInfo.totalChunks,
+          uploadedParts: result.resumeInfo.uploadedCount,
+          progress: result.resumeInfo.progress
+        }
+        
+        uploadSession.value = sessionInfo
+        resumeInfo.value = {
+          progress: result.resumeInfo.progress,
+          totalChunks: result.resumeInfo.totalChunks,
+          uploadedCount: result.resumeInfo.uploadedCount
+        }
+        
+        await createChunksAndMarkUploaded(currentFile.value, sessionInfo, result.uploadedChunks)
+      } else if (result.session) {
+        // 兼容旧格式：如果后端返回session格式
+        console.log('🔄 发现S3断点续传会话（旧格式）')
         uploadSession.value = result.session
         resumeInfo.value = {
           progress: result.session.progress || 0,
           totalChunks: result.session.totalChunks || 0,
           uploadedCount: result.session.uploadedParts || 0
         }
-        createChunksAndMarkUploaded(currentFile.value, result.session)
+        await createChunksAndMarkUploaded(currentFile.value, result.session)
       }
 
       return result
@@ -374,7 +406,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
   }
 
   // 创建分片并标记已上传的分片
-  const createChunksAndMarkUploaded = async (file: File, session: S3UploadSession) => {
+  const createChunksAndMarkUploaded = async (file: File, session: S3UploadSession, uploadedChunks?: string[]) => {
     const fileChunks: S3ChunkInfo[] = []
     const totalChunks = Math.ceil(file.size / chunkSize)
 
@@ -384,8 +416,19 @@ export function useS3Upload(options: S3UploadOptions = {}) {
       const blob = file.slice(start, end)
       const partNumber = i + 1 // S3分片号从1开始
 
-      const uploadedPartsCount = session.uploadedParts || 0
-      const isUploaded = uploadedPartsCount > i
+      // 判断分片是否已上传
+      let isUploaded = false
+      
+      if (uploadedChunks && uploadedChunks.length > 0) {
+        // 如果后端提供了uploadedChunks数组，使用该数组判断
+        // 假设uploadedChunks数组包含的是分片索引或分片标识符
+        const chunkIdentifier = `chunk${i}` // 根据后端格式调整
+        isUploaded = uploadedChunks.includes(chunkIdentifier) || uploadedChunks.includes(i.toString())
+      } else {
+        // 兼容旧逻辑：根据uploadedParts数量判断
+        const uploadedPartsCount = session.uploadedParts || 0
+        isUploaded = uploadedPartsCount > i
+      }
 
       // 为每个分片计算哈希
       const chunkHash = await calculateChunkHash(blob)
@@ -405,7 +448,9 @@ export function useS3Upload(options: S3UploadOptions = {}) {
 
     chunks.value = fileChunks
     updateTotalProgress()
-    console.log(`S3分片创建完成，总数: ${fileChunks.length}，已上传: ${session.uploadedParts}`)
+    
+    const actualUploadedCount = fileChunks.filter(chunk => chunk.uploaded).length
+    console.log(`S3分片创建完成，总数: ${fileChunks.length}，已上传: ${actualUploadedCount}`)
   }
 
   // 创建分片
