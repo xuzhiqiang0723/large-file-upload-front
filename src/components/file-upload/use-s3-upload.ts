@@ -362,8 +362,8 @@ export function useS3Upload(options: S3UploadOptions = {}) {
         return result
       } else if (result.resumeInfo && result.shouldUpload) {
         // 发现断点续传会话
-        console.log('🔄 发现S3断点续传会话')
-        
+        console.log('🔄 发现S3断点续传会话', result)
+        console.log(chunks.value, result.uploadedChunks)
         // 创建或更新会话信息，使用resumeInfo数据
         const sessionInfo: S3UploadSession = {
           sessionId: fileHash.value, // 使用文件哈希作为会话ID
@@ -375,15 +375,24 @@ export function useS3Upload(options: S3UploadOptions = {}) {
           uploadedParts: result.resumeInfo.uploadedCount,
           progress: result.resumeInfo.progress
         }
-        
+
         uploadSession.value = sessionInfo
         resumeInfo.value = {
           progress: result.resumeInfo.progress,
           totalChunks: result.resumeInfo.totalChunks,
           uploadedCount: result.resumeInfo.uploadedCount
         }
-        
+
         await createChunksAndMarkUploaded(currentFile.value, sessionInfo, result.uploadedChunks)
+        chunks.value = chunks.value.map(chunk => {
+          console.log(chunk, chunk.chunkHash, result.uploadedChunks, result.uploadedChunks?.includes(chunk.chunkHash!))
+
+          if (result.uploadedChunks?.includes(chunk.chunkHash!)) {
+            chunk.uploaded = true
+            chunk.progress = 100
+          }
+          return chunk
+        })
       } else if (result.session) {
         // 兼容旧格式：如果后端返回session格式
         console.log('🔄 发现S3断点续传会话（旧格式）')
@@ -418,7 +427,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
 
       // 判断分片是否已上传
       let isUploaded = false
-      
+
       if (uploadedChunks && uploadedChunks.length > 0) {
         // 如果后端提供了uploadedChunks数组，使用该数组判断
         // 假设uploadedChunks数组包含的是分片索引或分片标识符
@@ -448,7 +457,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
 
     chunks.value = fileChunks
     updateTotalProgress()
-    
+
     const actualUploadedCount = fileChunks.filter(chunk => chunk.uploaded).length
     console.log(`S3分片创建完成，总数: ${fileChunks.length}，已上传: ${actualUploadedCount}`)
   }
