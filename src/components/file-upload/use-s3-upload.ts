@@ -694,6 +694,9 @@ export function useS3Upload(options: S3UploadOptions = {}) {
     if (!uploadSession.value) {
       throw new Error('上传会话不存在')
     }
+    if (isPaused.value) {
+      throw new Error('上传已暂停，无法完成')
+    }
 
     try {
       console.log('🔗 完成S3分片上传...')
@@ -807,7 +810,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
     }
 
     // 等待一小段时间让所有请求都能被中止
-    await new Promise(resolve => setTimeout(resolve, 100))
+    // await new Promise(resolve => setTimeout(resolve, 100))
 
     console.log('S3上传已暂停，所有正在进行的请求已中止')
   }
@@ -835,6 +838,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
 
     try {
       await uploadChunksConcurrently()
+      console.log(uploadedChunks.value, totalChunks.value)
 
       // 检查是否所有分片都已上传完成
       if (uploadedChunks.value.length === totalChunks.value) {
