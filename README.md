@@ -1,6 +1,7 @@
 # Vue 3 S3大文件上传系统
 
 一个基于Vue 3 + TypeScript + Vite构建的S3大文件上传前端系统，支持分片上传、断点续传、秒传等高级功能。
+local-file-upload 对应后端仓库：[node-file-upload-server](https://github.com/xuzhiqiang0723/node-file-upload-server)
 
 ## ✨ 功能特性
 
