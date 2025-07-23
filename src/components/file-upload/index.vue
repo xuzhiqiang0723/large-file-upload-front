@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
-import { useS3Upload } from './use-s3-upload';
+import { useS3Upload } from './use-s3-upload'
 
 // 使用S3上传Hook
 const {
@@ -30,23 +30,23 @@ const {
   pauseUpload,
   resumeUpload,
   cancelUpload,
-  reset,
+  reset
 } = useS3Upload({
   chunkSize: 5 * 1024 * 1024, // 5MB分片，适合S3
   concurrent: 3, // 3个并发
   retryTimes: 3,
   baseUrl: 'http://localhost:3000/api/s3/upload',
   headers: {},
-  hashChunkSize: 1 * 1024 * 1024, // 1MB for hash calculation
-});
+  hashChunkSize: 1 * 1024 * 1024 // 1MB for hash calculation
+})
 
-const fileInput = ref<HTMLInputElement>();
-const uploadResult = ref<string>('');
-const errorMessage = ref<string>('');
-const showDebug = ref(false);
-const uploadStartTime = ref<number>(0);
-const lastUploadedBytes = ref<number>(0);
-const lastTimeStamp = ref<number>(0);
+const fileInput = ref<HTMLInputElement>()
+const uploadResult = ref<string>('')
+const errorMessage = ref<string>('')
+const showDebug = ref(false)
+const uploadStartTime = ref<number>(0)
+const lastUploadedBytes = ref<number>(0)
+const lastTimeStamp = ref<number>(0)
 
 // 调试信息
 const debugInfo = computed(() => ({
@@ -61,7 +61,7 @@ const debugInfo = computed(() => ({
     ? {
         name: currentFile.value.name,
         size: currentFile.value.size,
-        type: currentFile.value.type,
+        type: currentFile.value.type
       }
     : null,
   fileHash: fileHash.value,
@@ -71,52 +71,48 @@ const debugInfo = computed(() => ({
   uploadedChunksCount: uploadedChunks.value.length,
   progress: uploadProgress,
   errorMessage: errorMessage.value,
-  timestamp: new Date().toLocaleString(),
-}));
+  timestamp: new Date().toLocaleString()
+}))
 
 // 计算上传总时长
 const uploadDuration = computed(() => {
   if (uploadStartTime.value && isCompleted.value) {
-    const duration = Date.now() - uploadStartTime.value;
-    const seconds = Math.floor(duration / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
+    const duration = Date.now() - uploadStartTime.value
+    const seconds = Math.floor(duration / 1000)
+    const minutes = Math.floor(seconds / 60)
+    const hours = Math.floor(minutes / 60)
 
     if (hours > 0) {
-      return `${hours}小时${minutes % 60}分${seconds % 60}秒`;
+      return `${hours}小时${minutes % 60}分${seconds % 60}秒`
     } else if (minutes > 0) {
-      return `${minutes}分${seconds % 60}秒`;
+      return `${minutes}分${seconds % 60}秒`
     } else {
-      return `${seconds}秒`;
+      return `${seconds}秒`
     }
   }
-  return '';
-});
+  return ''
+})
 
 // 获取分片状态图标
 const getChunkStatusIcon = (chunk: any) => {
   if (chunk.uploaded) {
-    return chunk.uploaded && resumeInfo.value ? '🔄' : '✓';
+    return chunk.uploaded && resumeInfo.value ? '🔄' : '✓'
   } else if (chunk.progress > 0) {
-    return '↑';
+    return '↑'
   } else if (chunk.retryCount > 0) {
-    return '⚠';
+    return '⚠'
   } else {
-    return '○';
+    return '○'
   }
-};
+}
 
 // 获取分片提示信息
 const getChunkTooltip = (chunk: any) => {
-  const status = chunk.uploaded
-    ? '已完成'
-    : chunk.progress > 0
-      ? '上传中'
-      : '等待中';
-  const resumeText = chunk.uploaded && resumeInfo.value ? ' (断点续传)' : '';
-  const retryText = chunk.retryCount > 0 ? ` (重试${chunk.retryCount}次)` : '';
-  return `S3分片 ${chunk.partNumber}: ${status}${resumeText}${retryText}`;
-};
+  const status = chunk.uploaded ? '已完成' : chunk.progress > 0 ? '上传中' : '等待中'
+  const resumeText = chunk.uploaded && resumeInfo.value ? ' (断点续传)' : ''
+  const retryText = chunk.retryCount > 0 ? ` (重试${chunk.retryCount}次)` : ''
+  return `S3分片 ${chunk.partNumber}: ${status}${resumeText}${retryText}`
+}
 
 // 获取步骤样式类
 const getStepClass = (stepNumber: number) => {
@@ -124,465 +120,442 @@ const getStepClass = (stepNumber: number) => {
     case 1: {
       return {
         active: !currentFile.value,
-        completed: currentFile.value,
-      };
+        completed: currentFile.value
+      }
     }
     case 2: {
       return {
-        active:
-          currentFile.value &&
-          !fileHash.value &&
-          !isCalculatingHash.value &&
-          !isCheckingUpload.value,
+        active: currentFile.value && !fileHash.value && !isCalculatingHash.value && !isCheckingUpload.value,
         completed: fileHash.value,
-        processing: isCalculatingHash.value || isCheckingUpload.value,
-      };
+        processing: isCalculatingHash.value || isCheckingUpload.value
+      }
     }
     case 3: {
       return {
-        active:
-          fileHash.value &&
-          !isUploading.value &&
-          !isCompleted.value &&
-          !isSecondTransfer.value,
+        active: fileHash.value && !isUploading.value && !isCompleted.value && !isSecondTransfer.value,
         completed: isCompleted.value || isSecondTransfer.value,
-        processing: isUploading.value,
-      };
+        processing: isUploading.value
+      }
     }
     default: {
-      return {};
+      return {}
     }
   }
-};
+}
 
 // 获取步骤图标
 const getStepIcon = (stepNumber: number) => {
   switch (stepNumber) {
     case 1: {
-      return currentFile.value ? '✅' : '👆';
+      return currentFile.value ? '✅' : '👆'
     }
     case 2: {
-      return isCalculatingHash.value || isCheckingUpload.value
-        ? '⏳'
-        : fileHash.value
-          ? '✅'
-          : '🔢';
+      return isCalculatingHash.value || isCheckingUpload.value ? '⏳' : fileHash.value ? '✅' : '🔢'
     }
     case 3: {
-      return isCompleted.value || isSecondTransfer.value
-        ? '✅'
-        : isUploading.value
-          ? '⏳'
-          : '🚀';
+      return isCompleted.value || isSecondTransfer.value ? '✅' : isUploading.value ? '⏳' : '🚀'
     }
     default: {
-      return '○';
+      return '○'
     }
   }
-};
+}
 
 // 监听文件变化
-watch(currentFile, (newFile) => {
-  console.log('文件选择变化:', newFile);
+watch(currentFile, newFile => {
+  console.log('文件选择变化:', newFile)
   if (newFile) {
-    uploadResult.value = '';
-    errorMessage.value = '';
+    uploadResult.value = ''
+    errorMessage.value = ''
   }
-});
+})
 
 // 监听上传开始
-watch(isUploading, (uploading) => {
+watch(isUploading, uploading => {
   if (uploading && !uploadStartTime.value) {
-    uploadStartTime.value = Date.now();
-    lastUploadedBytes.value = 0;
-    lastTimeStamp.value = Date.now();
+    uploadStartTime.value = Date.now()
+    lastUploadedBytes.value = 0
+    lastTimeStamp.value = Date.now()
   }
-});
+})
 
 // 监听哈希计算状态
-watch(isCalculatingHash, (calculating) => {
-  console.log('MD5计算状态:', calculating ? '开始' : '完成');
-});
+watch(isCalculatingHash, calculating => {
+  console.log('MD5计算状态:', calculating ? '开始' : '完成')
+})
 
 // 监听文件哈希变化
-watch(fileHash, (newHash) => {
-  console.log('文件哈希计算完成:', newHash);
-});
+watch(fileHash, newHash => {
+  console.log('文件哈希计算完成:', newHash)
+})
 
 // 监听秒传状态
-watch(isSecondTransfer, (secondTransfer) => {
+watch(isSecondTransfer, secondTransfer => {
   if (secondTransfer) {
-    console.log('⚡ S3秒传成功！');
+    console.log('⚡ S3秒传成功！')
   }
-});
+})
 
 // 触发文件选择
 const triggerFileSelect = () => {
-  if (isCalculatingHash.value || isUploading.value || isCheckingUpload.value)
-    return;
-  fileInput.value?.click();
-};
+  if (isCalculatingHash.value || isUploading.value || isCheckingUpload.value) return
+  fileInput.value?.click()
+}
 
 // 处理文件选择
 const handleFileSelect = async (event: Event) => {
   try {
-    const target = event.target as HTMLInputElement;
-    const file = target.files?.[0];
+    const target = event.target as HTMLInputElement
+    const file = target.files?.[0]
 
-    console.log('选择的文件:', file);
+    console.log('选择的文件:', file)
 
     if (!file) {
-      console.log('没有选择文件');
-      return;
+      console.log('没有选择文件')
+      return
     }
 
     // 文件大小检查
     if (file.size === 0) {
-      errorMessage.value = '文件大小为0，请选择有效文件';
-      return;
+      errorMessage.value = '文件大小为0，请选择有效文件'
+      return
     }
 
     if (file.size > 10 * 1024 * 1024 * 1024) {
       // 10GB 限制
-      errorMessage.value = '文件过大，请选择小于10GB的文件';
-      return;
+      errorMessage.value = '文件过大，请选择小于10GB的文件'
+      return
     }
 
     // 重置状态
-    reset();
-    uploadResult.value = '';
-    errorMessage.value = '';
-    uploadStartTime.value = 0;
+    reset()
+    uploadResult.value = ''
+    errorMessage.value = ''
+    uploadStartTime.value = 0
 
     // 手动设置文件到 currentFile
-    currentFile.value = file;
+    currentFile.value = file
 
     console.log('文件设置成功:', {
       name: file.name,
       size: `${(file.size / 1024 / 1024).toFixed(2)}MB`,
-      type: file.type,
-    });
+      type: file.type
+    })
 
     // 强制更新视图
-    await nextTick();
+    await nextTick()
   } catch (error) {
-    console.error('文件选择处理失败:', error);
-    errorMessage.value =
-      error instanceof Error ? error.message : '文件选择失败';
+    console.error('文件选择处理失败:', error)
+    errorMessage.value = error instanceof Error ? error.message : '文件选择失败'
   }
-};
+}
 
 // 处理计算哈希
 const handleCalculateHash = async () => {
   try {
-    console.log('开始计算S3文件哈希');
-    errorMessage.value = '';
+    console.log('开始计算S3文件哈希')
+    errorMessage.value = ''
 
-    await startCalculateHash();
+    await startCalculateHash()
 
-    console.log('S3文件哈希计算完成');
+    console.log('S3文件哈希计算完成')
   } catch (error) {
-    console.error('计算哈希失败:', error);
-    errorMessage.value =
-      error instanceof Error ? error.message : '计算哈希失败';
+    console.error('计算哈希失败:', error)
+    errorMessage.value = error instanceof Error ? error.message : '计算哈希失败'
   }
-};
+}
 
 // 清除文件
 const clearFile = () => {
-  reset();
-  uploadResult.value = '';
-  errorMessage.value = '';
-  uploadStartTime.value = 0;
+  reset()
+  uploadResult.value = ''
+  errorMessage.value = ''
+  uploadStartTime.value = 0
   if (fileInput.value) {
-    fileInput.value.value = '';
+    fileInput.value.value = ''
   }
-};
+}
 
 // 开始上传
 const handleStartUpload = async () => {
   if (!currentFile.value) {
-    errorMessage.value = '请先选择文件';
-    return;
+    errorMessage.value = '请先选择文件'
+    return
   }
 
   if (!fileHash.value) {
-    errorMessage.value = '请先计算文件哈希值';
-    return;
+    errorMessage.value = '请先计算文件哈希值'
+    return
   }
 
   try {
-    console.log('开始S3上传文件:', currentFile.value.name);
-    errorMessage.value = '';
-    uploadStartTime.value = Date.now();
+    console.log('开始S3上传文件:', currentFile.value.name)
+    errorMessage.value = ''
+    uploadStartTime.value = Date.now()
 
-    const result = await startUpload();
+    const result = await startUpload()
 
     if (result) {
-      uploadResult.value = result;
-      console.log('S3上传成功:', result);
+      uploadResult.value = result
+      console.log('S3上传成功:', result)
     }
   } catch (error) {
-    console.error('S3上传失败:', error);
-    errorMessage.value = error instanceof Error ? error.message : 'S3上传失败';
+    console.error('S3上传失败:', error)
+    errorMessage.value = error instanceof Error ? error.message : 'S3上传失败'
   }
-};
+}
 
 // 暂停上传
 const handlePauseUpload = async () => {
   try {
-    console.log('暂停S3上传');
-    await pauseUpload();
+    console.log('暂停S3上传')
+    await pauseUpload()
   } catch (error) {
-    console.error('暂停S3上传失败:', error);
-    errorMessage.value =
-      error instanceof Error ? error.message : '暂停S3上传失败';
+    console.error('暂停S3上传失败:', error)
+    errorMessage.value = error instanceof Error ? error.message : '暂停S3上传失败'
   }
-};
+}
 const handleResumeUpload = async () => {
   try {
-    console.log('恢复S3上传');
-    errorMessage.value = '';
+    console.log('恢复S3上传')
+    errorMessage.value = ''
 
-    const result = await resumeUpload();
+    const result = await resumeUpload()
 
     if (result) {
-      uploadResult.value = result;
-      console.log('恢复S3上传成功:', result);
+      uploadResult.value = result
+      console.log('恢复S3上传成功:', result)
     }
   } catch (error) {
-    console.error('恢复S3上传失败:', error);
-    errorMessage.value =
-      error instanceof Error ? error.message : '恢复S3上传失败';
+    console.error('恢复S3上传失败:', error)
+    errorMessage.value = error instanceof Error ? error.message : '恢复S3上传失败'
   }
-};
+}
 
 // 重试上传
 const handleRetryUpload = async () => {
   try {
-    console.log('重试S3上传');
-    errorMessage.value = '';
-    uploadStartTime.value = Date.now();
+    console.log('重试S3上传')
+    errorMessage.value = ''
+    uploadStartTime.value = Date.now()
 
-    const result = await startUpload();
+    const result = await startUpload()
 
     if (result) {
-      uploadResult.value = result;
-      console.log('重试S3上传成功:', result);
+      uploadResult.value = result
+      console.log('重试S3上传成功:', result)
     }
   } catch (error) {
-    console.error('重试S3上传失败:', error);
-    errorMessage.value =
-      error instanceof Error ? error.message : '重试S3上传失败';
+    console.error('重试S3上传失败:', error)
+    errorMessage.value = error instanceof Error ? error.message : '重试S3上传失败'
   }
-};
+}
 
 // 取消上传
 const handleCancelUpload = () => {
-  cancelUpload();
-  clearFile();
-  console.log('S3上传已取消');
-};
+  cancelUpload()
+  clearFile()
+  console.log('S3上传已取消')
+}
 
 // 开始新的上传
 const handleNewUpload = () => {
-  clearFile();
-  console.log('准备上传新文件到S3');
-};
+  clearFile()
+  console.log('准备上传新文件到S3')
+}
 
 // 下载文件
 const downloadFile = () => {
   if (uploadResult.value) {
-    window.open(uploadResult.value, '_blank');
+    window.open(uploadResult.value, '_blank')
   }
-};
+}
 
 // 复制下载链接
 const copyDownloadLink = async () => {
   if (uploadResult.value) {
     try {
-      await navigator.clipboard.writeText(uploadResult.value);
-      alert('下载链接已复制到剪贴板');
+      await navigator.clipboard.writeText(uploadResult.value)
+      alert('下载链接已复制到剪贴板')
     } catch (error) {
-      console.error('复制失败:', error);
+      console.error('复制失败:', error)
       // 降级方案
-      const textArea = document.createElement('textarea');
-      textArea.value = uploadResult.value;
-      document.body.append(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      textArea.remove();
-      alert('下载链接已复制到剪贴板');
+      const textArea = document.createElement('textarea')
+      textArea.value = uploadResult.value
+      document.body.append(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      textArea.remove()
+      alert('下载链接已复制到剪贴板')
     }
   }
-};
+}
 
 // 清除错误
 const clearError = () => {
-  errorMessage.value = '';
-};
+  errorMessage.value = ''
+}
 
 // 切换调试信息
 const toggleDebug = () => {
-  showDebug.value = !showDebug.value;
-};
+  showDebug.value = !showDebug.value
+}
 
 // 格式化文件大小
 const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) return '0 B';
+  if (bytes === 0) return '0 B'
 
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
 
-  return `${Number.parseFloat((bytes / k ** i).toFixed(2))} ${sizes[i]}`;
-};
+  return `${Number.parseFloat((bytes / k ** i).toFixed(2))} ${sizes[i]}`
+}
 
 // 测试函数
 const testConnection = async () => {
   try {
-    const response = await fetch('http://localhost:3000/api/health');
-    const data = await response.json();
-    console.log('服务器连接测试:', data);
-    return data;
+    const response = await fetch('http://localhost:3000/api/health')
+    const data = await response.json()
+    console.log('服务器连接测试:', data)
+    return data
   } catch (error) {
-    console.error('服务器连接失败:', error);
-    errorMessage.value = '无法连接到服务器，请确保服务器已启动';
-    throw error;
+    console.error('服务器连接失败:', error)
+    errorMessage.value = '无法连接到服务器，请确保服务器已启动'
+    throw error
   }
-};
+}
 
 // 新增：速度图表相关
-const speedChart = ref<HTMLCanvasElement>();
-let chartAnimationId: null | number = null;
+const speedChart = ref<HTMLCanvasElement>()
+let chartAnimationId: null | number = null
 
 // 格式化上传时间
 const formatUploadTime = () => {
-  if (networkStats.startTime === 0) return '0秒';
+  if (networkStats.startTime === 0) return '0秒'
 
-  const elapsed = Date.now() - networkStats.startTime;
-  const seconds = Math.floor(elapsed / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
+  const elapsed = Date.now() - networkStats.startTime
+  const seconds = Math.floor(elapsed / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
 
   if (hours > 0) {
-    return `${hours}小时${minutes % 60}分钟`;
+    return `${hours}小时${minutes % 60}分钟`
   } else if (minutes > 0) {
-    return `${minutes}分钟${seconds % 60}秒`;
+    return `${minutes}分钟${seconds % 60}秒`
   } else {
-    return `${seconds}秒`;
+    return `${seconds}秒`
   }
-};
+}
 
 // 绘制速度图表
 const drawSpeedChart = () => {
-  if (!speedChart.value || networkStats.speedHistory.length === 0) return;
+  if (!speedChart.value || networkStats.speedHistory.length === 0) return
 
-  const canvas = speedChart.value;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  const canvas = speedChart.value
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
 
-  const width = canvas.width;
-  const height = canvas.height;
+  const width = canvas.width
+  const height = canvas.height
 
   // 清空画布
-  ctx.clearRect(0, 0, width, height);
+  ctx.clearRect(0, 0, width, height)
 
   // 计算最大速度用于缩放
-  const maxSpeed = Math.max(...networkStats.speedHistory, speedInfo.average);
-  if (maxSpeed === 0) return;
+  const maxSpeed = Math.max(...networkStats.speedHistory, speedInfo.average)
+  if (maxSpeed === 0) return
 
   // 绘制网格
-  ctx.strokeStyle = '#e1e4e8';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = '#e1e4e8'
+  ctx.lineWidth = 1
 
   // 水平网格线
   for (let i = 0; i <= 4; i++) {
-    const y = (height / 4) * i;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
+    const y = (height / 4) * i
+    ctx.beginPath()
+    ctx.moveTo(0, y)
+    ctx.lineTo(width, y)
+    ctx.stroke()
   }
 
   // 垂直网格线
   for (let i = 0; i <= 10; i++) {
-    const x = (width / 10) * i;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-    ctx.stroke();
+    const x = (width / 10) * i
+    ctx.beginPath()
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, height)
+    ctx.stroke()
   }
 
   // 绘制平均速度线
-  ctx.strokeStyle = '#28a745';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([5, 5]);
-  const avgY = height - (speedInfo.average / maxSpeed) * height;
-  ctx.beginPath();
-  ctx.moveTo(0, avgY);
-  ctx.lineTo(width, avgY);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  ctx.strokeStyle = '#28a745'
+  ctx.lineWidth = 2
+  ctx.setLineDash([5, 5])
+  const avgY = height - (speedInfo.average / maxSpeed) * height
+  ctx.beginPath()
+  ctx.moveTo(0, avgY)
+  ctx.lineTo(width, avgY)
+  ctx.stroke()
+  ctx.setLineDash([])
 
   // 绘制速度曲线
   if (networkStats.speedHistory.length > 1) {
-    ctx.strokeStyle = '#0366d6';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
+    ctx.strokeStyle = '#0366d6'
+    ctx.lineWidth = 2
+    ctx.beginPath()
 
     networkStats.speedHistory.forEach((speed, index) => {
-      const x = (index / (networkStats.speedHistory.length - 1)) * width;
-      const y = height - (speed / maxSpeed) * height;
+      const x = (index / (networkStats.speedHistory.length - 1)) * width
+      const y = height - (speed / maxSpeed) * height
 
       if (index === 0) {
-        ctx.moveTo(x, y);
+        ctx.moveTo(x, y)
       } else {
-        ctx.lineTo(x, y);
+        ctx.lineTo(x, y)
       }
-    });
+    })
 
-    ctx.stroke();
+    ctx.stroke()
   }
 
   // 绘制当前速度点
   if (networkStats.speedHistory.length > 0) {
-    ctx.fillStyle = '#dc3545';
-    const lastSpeed =
-      networkStats.speedHistory[networkStats.speedHistory.length - 1];
-    const x = width;
-    const y = height - ((lastSpeed || 0) / maxSpeed) * height;
+    ctx.fillStyle = '#dc3545'
+    const lastSpeed = networkStats.speedHistory[networkStats.speedHistory.length - 1]
+    const x = width
+    const y = height - ((lastSpeed || 0) / maxSpeed) * height
 
-    ctx.beginPath();
-    ctx.arc(x - 5, y, 4, 0, 2 * Math.PI);
-    ctx.fill();
+    ctx.beginPath()
+    ctx.arc(x - 5, y, 4, 0, 2 * Math.PI)
+    ctx.fill()
   }
-};
+}
 
 // 监听速度变化并更新图表
 watch(
   () => networkStats.speedHistory.length,
   () => {
     if (chartAnimationId) {
-      cancelAnimationFrame(chartAnimationId);
+      cancelAnimationFrame(chartAnimationId)
     }
-    chartAnimationId = requestAnimationFrame(drawSpeedChart);
-  },
-);
+    chartAnimationId = requestAnimationFrame(drawSpeedChart)
+  }
+)
 
 // 组件卸载时清理
 onUnmounted(() => {
   if (chartAnimationId) {
-    cancelAnimationFrame(chartAnimationId);
+    cancelAnimationFrame(chartAnimationId)
   }
-});
+})
 
 // 组件挂载时测试服务器连接
 onMounted(() => {
   testConnection().catch(() => {
     // 连接失败的处理已在 testConnection 中完成
-  });
-});
+  })
+})
 </script>
 
 <template>
@@ -612,14 +585,26 @@ onMounted(() => {
       <h4>⚡ S3秒传成功！</h4>
       <p>检测到S3已存在相同文件，无需重复上传</p>
       <div class="second-transfer-info">
-        <p><strong>文件名:</strong> {{ currentFile?.name }}</p>
+        <p>
+          <strong>文件名:</strong>
+          {{ currentFile?.name }}
+        </p>
         <p>
           <strong>文件大小:</strong>
           {{ currentFile ? formatFileSize(currentFile.size) : '' }}
         </p>
-        <p><strong>文件哈希:</strong> {{ fileHash }}</p>
-        <p><strong>存储位置:</strong> Amazon S3</p>
-        <p><strong>节省时间:</strong> 瞬间完成上传</p>
+        <p>
+          <strong>文件哈希:</strong>
+          {{ fileHash }}
+        </p>
+        <p>
+          <strong>存储位置:</strong>
+          Amazon S3
+        </p>
+        <p>
+          <strong>节省时间:</strong>
+          瞬间完成上传
+        </p>
       </div>
     </div>
 
@@ -629,15 +614,16 @@ onMounted(() => {
       <p>检测到该文件之前的S3上传记录，可以从断点继续上传</p>
       <div class="resume-details">
         <p>
-          <strong>已上传分片:</strong> {{ resumeInfo.uploadedCount }} /
+          <strong>已上传分片:</strong>
+          {{ resumeInfo.uploadedCount }} /
           {{ resumeInfo.totalChunks }}
         </p>
-        <p><strong>上传进度:</strong> {{ resumeInfo.progress }}%</p>
+        <p>
+          <strong>上传进度:</strong>
+          {{ resumeInfo.progress }}%
+        </p>
         <div class="resume-progress-bar">
-          <div
-            class="resume-progress-fill"
-            :style="{ width: `${resumeInfo.progress}%` }"
-          ></div>
+          <div class="resume-progress-fill" :style="{ width: `${resumeInfo.progress}%` }"></div>
         </div>
         <p class="resume-tip">您可以直接继续上传剩余部分到S3</p>
       </div>
@@ -647,10 +633,7 @@ onMounted(() => {
     <div v-if="isCalculatingHash" class="hash-progress">
       <h4>🔢 正在计算文件哈希值...</h4>
       <div class="progress-bar">
-        <div
-          class="progress-fill hash-fill"
-          :style="{ width: `${hashProgress.percentage}%` }"
-        ></div>
+        <div class="progress-fill hash-fill" :style="{ width: `${hashProgress.percentage}%` }"></div>
       </div>
       <div class="progress-info">
         <span>{{ hashProgress.percentage }}%</span>
@@ -666,20 +649,14 @@ onMounted(() => {
       class="upload-area"
       @click="triggerFileSelect"
       :class="{
-        disabled:
-          isCalculatingHash ||
-          isUploading ||
-          isCheckingUpload ||
-          isInitializing,
+        disabled: isCalculatingHash || isUploading || isCheckingUpload || isInitializing
       }"
     >
       <input
         ref="fileInput"
         type="file"
         @change="handleFileSelect"
-        :disabled="
-          isCalculatingHash || isUploading || isCheckingUpload || isInitializing
-        "
+        :disabled="isCalculatingHash || isUploading || isCheckingUpload || isInitializing"
         class="file-input"
         style="display: none"
       />
@@ -700,36 +677,18 @@ onMounted(() => {
         <!-- 哈希状态显示 -->
         <div class="hash-status">
           <p v-if="fileHash" class="hash-complete">✅ MD5: {{ fileHash }}</p>
-          <p v-else-if="isCalculatingHash" class="calculating">
-            🔢 正在计算MD5... {{ hashProgress.percentage }}%
-          </p>
-          <p v-else-if="isCheckingUpload" class="checking">
-            🔍 正在检查S3文件状态...
-          </p>
-          <p v-else-if="isInitializing" class="checking">
-            🚀 正在初始化S3上传...
-          </p>
+          <p v-else-if="isCalculatingHash" class="calculating">🔢 正在计算MD5... {{ hashProgress.percentage }}%</p>
+          <p v-else-if="isCheckingUpload" class="checking">🔍 正在检查S3文件状态...</p>
+          <p v-else-if="isInitializing" class="checking">🚀 正在初始化S3上传...</p>
           <p v-else class="hash-pending">⏳ 需要计算文件哈希值</p>
         </div>
 
         <button
           @click.stop="clearFile"
           class="clear-btn"
-          :disabled="
-            isCalculatingHash ||
-            isUploading ||
-            isCheckingUpload ||
-            isInitializing
-          "
+          :disabled="isCalculatingHash || isUploading || isCheckingUpload || isInitializing"
         >
-          {{
-            isCalculatingHash ||
-            isUploading ||
-            isCheckingUpload ||
-            isInitializing
-              ? '处理中...'
-              : '清除文件'
-          }}
+          {{ isCalculatingHash || isUploading || isCheckingUpload || isInitializing ? '处理中...' : '清除文件' }}
         </button>
       </div>
     </div>
@@ -738,25 +697,13 @@ onMounted(() => {
     <div class="action-controls">
       <!-- 计算哈希按钮 -->
       <div
-        v-if="
-          currentFile &&
-          !fileHash &&
-          !isCalculatingHash &&
-          !isCheckingUpload &&
-          !isInitializing
-        "
+        v-if="currentFile && !fileHash && !isCalculatingHash && !isCheckingUpload && !isInitializing"
         class="hash-controls"
       >
-        <button
-          @click="handleCalculateHash"
-          class="btn btn-info btn-large"
-          :disabled="isUploading"
-        >
+        <button @click="handleCalculateHash" class="btn btn-info btn-large" :disabled="isUploading">
           🔢 计算文件哈希值
         </button>
-        <p class="hash-description">
-          计算文件的MD5哈希值，检查S3是否支持秒传或断点续传
-        </p>
+        <p class="hash-description">计算文件的MD5哈希值，检查S3是否支持秒传或断点续传</p>
       </div>
 
       <!-- 上传控制按钮 -->
@@ -764,79 +711,36 @@ onMounted(() => {
         <button
           @click="handleStartUpload"
           :disabled="
-            !currentFile ||
-            isUploading ||
-            !fileHash ||
-            isCalculatingHash ||
-            isCheckingUpload ||
-            isInitializing
+            !currentFile || isUploading || !fileHash || isCalculatingHash || isCheckingUpload || isInitializing
           "
           class="btn btn-primary btn-large"
         >
-          {{
-            resumeInfo
-              ? '🔄 继续S3上传'
-              : isUploading
-                ? 'S3上传中...'
-                : '☁️ 开始S3上传'
-          }}
+          {{ resumeInfo ? '🔄 继续S3上传' : isUploading ? 'S3上传中...' : '☁️ 开始S3上传' }}
         </button>
 
-        <button
-          v-if="isUploading && !isPaused"
-          @click="handlePauseUpload"
-          class="btn btn-warning"
-        >
-          ⏸️ 暂停
-        </button>
+        <button v-if="isUploading && !isPaused" @click="handlePauseUpload" class="btn btn-warning">⏸️ 暂停</button>
 
-        <button
-          v-if="isPaused"
-          @click="handleResumeUpload"
-          class="btn btn-success"
-        >
-          ▶️ 恢复
-        </button>
+        <button v-if="isPaused" @click="handleResumeUpload" class="btn btn-success">▶️ 恢复</button>
 
-        <button
-          @click="handleCancelUpload"
-          :disabled="!currentFile"
-          class="btn btn-danger"
-        >
-          ❌ 取消
-        </button>
+        <button @click="handleCancelUpload" :disabled="!currentFile" class="btn btn-danger">❌ 取消</button>
       </div>
 
       <!-- 秒传成功后的操作 -->
       <div v-if="isSecondTransfer" class="second-transfer-controls">
-        <button @click="downloadFile" class="btn btn-success btn-large">
-          📥 下载文件
-        </button>
-        <button @click="handleNewUpload" class="btn btn-outline">
-          📁 上传新文件
-        </button>
+        <button @click="downloadFile" class="btn btn-success btn-large">📥 下载文件</button>
+        <button @click="handleNewUpload" class="btn btn-outline">📁 上传新文件</button>
       </div>
     </div>
 
     <!-- 上传进度 -->
     <div
-      v-if="
-        currentFile &&
-        fileHash &&
-        !isCalculatingHash &&
-        !isCheckingUpload &&
-        !isInitializing &&
-        !isSecondTransfer
-      "
+      v-if="currentFile && fileHash && !isCalculatingHash && !isCheckingUpload && !isInitializing && !isSecondTransfer"
       class="progress-section"
     >
       <div class="overall-progress">
         <h4>S3总体进度</h4>
         <div class="progress-bar">
-          <div
-            class="progress-fill"
-            :style="{ width: `${uploadProgress.percentage}%` }"
-          ></div>
+          <div class="progress-fill" :style="{ width: `${uploadProgress.percentage}%` }"></div>
         </div>
         <div class="progress-info">
           <span>{{ uploadProgress.percentage }}%</span>
@@ -851,9 +755,7 @@ onMounted(() => {
           <div class="speed-row">
             <div class="speed-item">
               <span class="speed-label">当前速度:</span>
-              <span class="speed-value current">{{
-                formatSpeed(speedInfo.current)
-              }}</span>
+              <span class="speed-value current">{{ formatSpeed(speedInfo.current) }}</span>
             </div>
             <div class="speed-item">
               <span class="speed-label">平均速度:</span>
@@ -869,19 +771,14 @@ onMounted(() => {
             </div>
           </div>
           <div class="time-info">
-            <span class="time-item">
-              剩余时间: {{ calculateRemainingTime() }}
-            </span>
+            <span class="time-item">剩余时间: {{ calculateRemainingTime() }}</span>
             <span class="time-item">已用时间: {{ formatUploadTime() }}</span>
           </div>
         </div>
       </div>
 
       <!-- 网络速度图表 -->
-      <div
-        v-if="isUploading && networkStats.speedHistory.length > 0"
-        class="speed-chart"
-      >
+      <div v-if="isUploading && networkStats.speedHistory.length > 0" class="speed-chart">
         <h4>S3上传速度曲线</h4>
         <div class="chart-container">
           <canvas ref="speedChart" width="400" height="100"></canvas>
@@ -904,10 +801,8 @@ onMounted(() => {
         <div class="chunks-stats">
           <span class="stat-item">✅ 已完成: {{ uploadedChunks.length }}</span>
           <span class="stat-item">⏳ 剩余: {{ remainingChunks.length }}</span>
-          <span class="stat-item">
-            🔄 断点续传: {{ resumeInfo ? resumeInfo.uploadedCount : 0 }}
-          </span>
-          <span class="stat-item"> 📦 分片大小: 5MB (S3推荐) </span>
+          <span class="stat-item">🔄 断点续传: {{ resumeInfo ? resumeInfo.uploadedCount : 0 }}</span>
+          <span class="stat-item">📦 分片大小: 5MB (S3推荐)</span>
         </div>
         <div class="chunks-grid">
           <div
@@ -918,25 +813,20 @@ onMounted(() => {
               uploaded: chunk.uploaded,
               uploading: chunk.progress > 0 && chunk.progress < 100,
               error: chunk.retryCount > 0,
-              resumed: chunk.uploaded && resumeInfo,
+              resumed: chunk.uploaded && resumeInfo
             }"
             :title="getChunkTooltip(chunk)"
           >
             <span class="chunk-index">{{ chunk.partNumber }}</span>
             <div class="chunk-progress">
-              <div
-                class="chunk-progress-bar"
-                :style="{ width: `${chunk.progress}%` }"
-              ></div>
+              <div class="chunk-progress-bar" :style="{ width: `${chunk.progress}%` }"></div>
             </div>
             <span class="chunk-status">
               {{ getChunkStatusIcon(chunk) }}
             </span>
           </div>
         </div>
-        <p v-if="chunks.length > 50" class="chunks-note">
-          显示前50个S3分片，总共{{ chunks.length }}个分片
-        </p>
+        <p v-if="chunks.length > 50" class="chunks-note">显示前50个S3分片，总共{{ chunks.length }}个分片</p>
       </div>
     </div>
 
@@ -946,29 +836,35 @@ onMounted(() => {
     <div v-if="uploadResult && !isSecondTransfer" class="upload-result">
       <h4>✅ S3上传完成</h4>
       <div class="result-info">
-        <p><strong>文件名:</strong> {{ currentFile?.name }}</p>
+        <p>
+          <strong>文件名:</strong>
+          {{ currentFile?.name }}
+        </p>
         <p>
           <strong>文件大小:</strong>
           {{ currentFile ? formatFileSize(currentFile.size) : '' }}
         </p>
-        <p><strong>文件哈希:</strong> {{ fileHash }}</p>
-        <p><strong>存储位置:</strong> Amazon S3</p>
-        <p><strong>上传时间:</strong> {{ uploadDuration }}</p>
+        <p>
+          <strong>文件哈希:</strong>
+          {{ fileHash }}
+        </p>
+        <p>
+          <strong>存储位置:</strong>
+          Amazon S3
+        </p>
+        <p>
+          <strong>上传时间:</strong>
+          {{ uploadDuration }}
+        </p>
         <p>
           <strong>下载链接:</strong>
           <a :href="uploadResult" target="_blank">{{ uploadResult }}</a>
         </p>
       </div>
       <div class="result-actions">
-        <button @click="downloadFile" class="btn btn-success">
-          📥 下载文件
-        </button>
-        <button @click="copyDownloadLink" class="btn btn-outline">
-          📋 复制链接
-        </button>
-        <button @click="handleNewUpload" class="btn btn-outline">
-          📁 上传新文件
-        </button>
+        <button @click="downloadFile" class="btn btn-success">📥 下载文件</button>
+        <button @click="copyDownloadLink" class="btn btn-outline">📋 复制链接</button>
+        <button @click="handleNewUpload" class="btn btn-outline">📁 上传新文件</button>
       </div>
     </div>
 
@@ -976,29 +872,35 @@ onMounted(() => {
     <div v-if="uploadResult && isSecondTransfer" class="second-transfer-result">
       <h4>⚡ S3秒传完成</h4>
       <div class="result-info">
-        <p><strong>文件名:</strong> {{ currentFile?.name }}</p>
+        <p>
+          <strong>文件名:</strong>
+          {{ currentFile?.name }}
+        </p>
         <p>
           <strong>文件大小:</strong>
           {{ currentFile ? formatFileSize(currentFile.size) : '' }}
         </p>
-        <p><strong>文件哈希:</strong> {{ fileHash }}</p>
-        <p><strong>存储位置:</strong> Amazon S3</p>
-        <p><strong>完成时间:</strong> 瞬间完成</p>
+        <p>
+          <strong>文件哈希:</strong>
+          {{ fileHash }}
+        </p>
+        <p>
+          <strong>存储位置:</strong>
+          Amazon S3
+        </p>
+        <p>
+          <strong>完成时间:</strong>
+          瞬间完成
+        </p>
         <p>
           <strong>下载链接:</strong>
           <a :href="uploadResult" target="_blank">{{ uploadResult }}</a>
         </p>
       </div>
       <div class="result-actions">
-        <button @click="downloadFile" class="btn btn-success">
-          📥 下载文件
-        </button>
-        <button @click="copyDownloadLink" class="btn btn-outline">
-          📋 复制链接
-        </button>
-        <button @click="handleNewUpload" class="btn btn-outline">
-          📁 上传新文件
-        </button>
+        <button @click="downloadFile" class="btn btn-success">📥 下载文件</button>
+        <button @click="copyDownloadLink" class="btn btn-outline">📋 复制链接</button>
+        <button @click="handleNewUpload" class="btn btn-outline">📁 上传新文件</button>
       </div>
     </div>
 
@@ -1008,11 +910,7 @@ onMounted(() => {
       <p>{{ errorMessage }}</p>
       <div class="error-actions">
         <button @click="clearError" class="btn btn-outline">清除错误</button>
-        <button
-          v-if="fileHash && !isSecondTransfer"
-          @click="handleRetryUpload"
-          class="btn btn-primary"
-        >
+        <button v-if="fileHash && !isSecondTransfer" @click="handleRetryUpload" class="btn btn-primary">
           🔄 重试S3上传
         </button>
       </div>
@@ -1032,13 +930,7 @@ onMounted(() => {
         </li>
         <li :class="getStepClass(3)">
           <span class="step-icon">{{ getStepIcon(3) }}</span>
-          {{
-            isSecondTransfer
-              ? 'S3秒传完成'
-              : resumeInfo
-                ? 'S3断点续传'
-                : '开始S3分片上传'
-          }}
+          {{ isSecondTransfer ? 'S3秒传完成' : resumeInfo ? 'S3断点续传' : '开始S3分片上传' }}
         </li>
       </ol>
     </div>
@@ -1101,9 +993,7 @@ onMounted(() => {
       <button @click="toggleDebug" class="btn btn-outline">隐藏调试</button>
     </div>
 
-    <button v-else @click="toggleDebug" class="debug-toggle">
-      显示S3调试信息
-    </button>
+    <button v-else @click="toggleDebug" class="debug-toggle">显示S3调试信息</button>
   </div>
 </template>
 
@@ -1112,8 +1002,7 @@ onMounted(() => {
   max-width: 900px;
   margin: 0 auto;
   padding: 20px;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 /* S3存储标识 */
@@ -1654,12 +1543,7 @@ onMounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.3),
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
   animation: shimmer 2s infinite;
 }
 
@@ -1992,6 +1876,7 @@ onMounted(() => {
   padding-left: 20px;
   font-size: 13px;
   color: #6c757d;
+  text-align: left;
 }
 
 .performance-tips li {
@@ -2023,6 +1908,7 @@ onMounted(() => {
   color: #24292e;
   white-space: pre-wrap;
   word-wrap: break-word;
+  text-align: left;
 }
 
 .debug-toggle {
