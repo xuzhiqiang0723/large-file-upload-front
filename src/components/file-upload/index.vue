@@ -328,7 +328,17 @@ const handleStartUpload = async () => {
   }
 };
 
-// 恢复上传
+// 暂停上传
+const handlePauseUpload = async () => {
+  try {
+    console.log('暂停S3上传');
+    await pauseUpload();
+  } catch (error) {
+    console.error('暂停S3上传失败:', error);
+    errorMessage.value =
+      error instanceof Error ? error.message : '暂停S3上传失败';
+  }
+};
 const handleResumeUpload = async () => {
   try {
     console.log('恢复S3上传');
@@ -774,7 +784,7 @@ onMounted(() => {
 
         <button
           v-if="isUploading && !isPaused"
-          @click="pauseUpload"
+          @click="handlePauseUpload"
           class="btn btn-warning"
         >
           ⏸️ 暂停

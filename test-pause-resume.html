@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pause/Resume Test</title>
+</head>
+<body>
+    <h1>Large File Upload Pause/Resume Test</h1>
+    <p>This page tests the pause/resume functionality to ensure:</p>
+    <ul>
+        <li>✓ Pause actually stops ongoing chunk uploads</li>
+        <li>✓ Resume doesn't create duplicate chunk uploads</li>
+        <li>✓ AbortController properly cancels XMLHttpRequest calls</li>
+        <li>✓ Execution queue is properly managed</li>
+    </ul>
+    
+    <h2>Test Instructions:</h2>
+    <ol>
+        <li>Select a large file (> 10MB recommended)</li>
+        <li>Calculate hash and start upload</li>
+        <li>Click pause while chunks are uploading</li>
+        <li>Verify that ongoing uploads stop immediately</li>
+        <li>Click resume and verify no duplicate uploads occur</li>
+        <li>Check browser dev tools network tab for verification</li>
+    </ol>
+    
+    <h2>Expected Results:</h2>
+    <ul>
+        <li>✓ Pausing should immediately stop all active chunk uploads</li>
+        <li>✓ No new chunk uploads should start after pause</li>
+        <li>✓ Resuming should only upload remaining chunks</li>
+        <li>✓ No duplicate chunk uploads should occur</li>
+        <li>✓ Console should show abort messages for cancelled chunks</li>
+    </ul>
+    
+    <p><a href="/">Go to Main Application</a></p>
+</body>
+</html>

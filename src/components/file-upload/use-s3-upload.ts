@@ -17,6 +17,7 @@ interface S3ChunkInfo {
   uploadStartTime?: number;
   uploadEndTime?: number;
   chunkHash?: string; // 添加分片哈希
+  abortController?: AbortController; // 添加取消控制器
 }
 
 interface S3UploadOptions {
@@ -123,6 +124,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
 
   const isSecondTransfer = ref(false);
   const resumeInfo = ref<any>(null);
+  const executingChunks = ref<Set<number>>(new Set()); // 正在执行的分片索引
 
   // 计算属性
   const uploadedChunks = computed(() =>
@@ -509,6 +511,9 @@ export function useS3Upload(options: S3UploadOptions = {}) {
       throw new Error('上传会话或分片哈希不存在');
     }
 
+    // 创建新的 AbortController
+    chunk.abortController = new AbortController();
+
     const formData = new FormData();
     formData.append('chunk', chunk.blob);
     formData.append('fileHash', fileHash.value);
@@ -523,12 +528,23 @@ export function useS3Upload(options: S3UploadOptions = {}) {
 
       return new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
-          xhr.abort();
-          reject(new Error('上传超时'));
+          if (!chunk.abortController?.signal.aborted) {
+            xhr.abort();
+            reject(new Error('上传超时'));
+          }
         }, 60_000);
 
+        // 监听 AbortController 信号
+        if (chunk.abortController) {
+          chunk.abortController.signal.addEventListener('abort', () => {
+            clearTimeout(timeoutId);
+            xhr.abort();
+            reject(new Error('上传已取消'));
+          });
+        }
+
         xhr.upload.addEventListener('progress', (event) => {
-          if (event.lengthComputable) {
+          if (event.lengthComputable && !chunk.abortController?.signal.aborted) {
             chunk.progress = Math.round((event.loaded / event.total) * 100);
 
             const currentUploaded = uploadedSize.value + event.loaded;
@@ -571,6 +587,11 @@ export function useS3Upload(options: S3UploadOptions = {}) {
           reject(new Error('网络错误'));
         });
 
+        xhr.addEventListener('abort', () => {
+          clearTimeout(timeoutId);
+          reject(new Error('请求已中止'));
+        });
+
         xhr.open('POST', `${baseUrl}/chunk`);
         Object.entries(headers).forEach(([key, value]) => {
           xhr.setRequestHeader(key, value);
@@ -601,7 +622,10 @@ export function useS3Upload(options: S3UploadOptions = {}) {
 
   // 并发上传分片
   const uploadChunksConcurrently = async (): Promise<void> => {
-    const pendingChunks = [...remainingChunks.value];
+    // 只处理未上传且未正在执行的分片
+    const pendingChunks = remainingChunks.value.filter(
+      chunk => !executingChunks.value.has(chunk.index)
+    );
     const executing: Promise<void>[] = [];
 
     console.log(
@@ -611,23 +635,38 @@ export function useS3Upload(options: S3UploadOptions = {}) {
     const uploadSingleChunk = async (chunk: S3ChunkInfo): Promise<void> => {
       if (isPaused.value) return;
 
-      let success = false;
-      let attempts = 0;
+      // 标记分片正在执行
+      executingChunks.value.add(chunk.index);
 
-      while (!success && attempts < retryTimes && !isPaused.value) {
-        attempts++;
-        success = await uploadChunk(chunk);
+      try {
+        let success = false;
+        let attempts = 0;
 
-        if (!success && attempts < retryTimes) {
-          console.log(`S3分片 ${chunk.partNumber} 第 ${attempts} 次重试`);
-          await new Promise((resolve) => setTimeout(resolve, 1000 * attempts));
+        while (!success && attempts < retryTimes && !isPaused.value) {
+          attempts++;
+          success = await uploadChunk(chunk);
+
+          if (!success && attempts < retryTimes && !isPaused.value) {
+            console.log(`S3分片 ${chunk.partNumber} 第 ${attempts} 次重试`);
+            await new Promise((resolve) => setTimeout(resolve, 1000 * attempts));
+          }
         }
-      }
 
-      if (!success) {
-        throw new Error(
-          `S3分片 ${chunk.partNumber} 上传失败，已重试 ${retryTimes} 次`,
-        );
+        if (!success && !isPaused.value) {
+          throw new Error(
+            `S3分片 ${chunk.partNumber} 上传失败，已重试 ${retryTimes} 次`,
+          );
+        }
+      } catch (error) {
+        // 如果是因为暂停而中止，不抛出错误
+        if (isPaused.value && error instanceof Error && error.message.includes('已取消')) {
+          console.log(`S3分片 ${chunk.partNumber} 因暂停而中止上传`);
+          return;
+        }
+        throw error;
+      } finally {
+        // 从执行列表中移除
+        executingChunks.value.delete(chunk.index);
       }
     };
 
@@ -635,18 +674,44 @@ export function useS3Upload(options: S3UploadOptions = {}) {
       if (isPaused.value) break;
 
       const promise = uploadSingleChunk(chunk).then(() => {
-        executing.splice(executing.indexOf(promise), 1);
+        const index = executing.indexOf(promise);
+        if (index > -1) {
+          executing.splice(index, 1);
+        }
+      }).catch((error) => {
+        const index = executing.indexOf(promise);
+        if (index > -1) {
+          executing.splice(index, 1);
+        }
+        // 如果不是因为暂停而失败，重新抛出错误
+        if (!isPaused.value) {
+          throw error;
+        }
       });
 
       executing.push(promise);
 
       if (executing.length >= concurrent) {
-        await Promise.race(executing);
+        try {
+          await Promise.race(executing);
+        } catch (error) {
+          // 如果是因为暂停而失败，停止添加新的分片
+          if (isPaused.value) {
+            break;
+          }
+          throw error;
+        }
       }
     }
 
-    await Promise.all(executing);
-    console.log('所有S3分片上传完成');
+    // 等待所有正在执行的分片完成（或被中止）
+    await Promise.allSettled(executing);
+    
+    if (!isPaused.value) {
+      console.log('所有S3分片上传完成');
+    } else {
+      console.log('S3分片上传已暂停');
+    }
   };
 
   // 完成上传 - 修改参数以匹配后端接口
@@ -753,9 +818,23 @@ export function useS3Upload(options: S3UploadOptions = {}) {
   };
 
   // 暂停上传
-  const pauseUpload = () => {
+  const pauseUpload = async () => {
     console.log('暂停S3上传');
     isPaused.value = true;
+
+    // 中止所有正在进行的分片上传
+    for (const chunk of chunks.value) {
+      if (chunk.abortController && !chunk.uploaded && chunk.progress > 0) {
+        console.log(`中止S3分片 ${chunk.partNumber} 的上传`);
+        chunk.abortController.abort();
+        chunk.progress = 0; // 重置进度
+      }
+    }
+
+    // 等待一小段时间让所有请求都能被中止
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    console.log('S3上传已暂停，所有正在进行的请求已中止');
   };
 
   // 恢复上传
@@ -768,12 +847,31 @@ export function useS3Upload(options: S3UploadOptions = {}) {
     isPaused.value = false;
     isUploading.value = true;
 
+    // 清除执行中的分片记录（这些分片可能因为暂停而中断了）
+    executingChunks.value.clear();
+
+    // 重置被中断的分片状态
+    for (const chunk of chunks.value) {
+      if (!chunk.uploaded && chunk.progress > 0 && chunk.progress < 100) {
+        chunk.progress = 0; // 重置未完成分片的进度
+        chunk.abortController = undefined; // 清除旧的 AbortController
+      }
+    }
+
     try {
       await uploadChunksConcurrently();
-      const result = await completeUpload();
-      isCompleted.value = true;
-      isUploading.value = false;
-      return result;
+      
+      // 检查是否所有分片都已上传完成
+      if (uploadedChunks.value.length === totalChunks.value) {
+        const result = await completeUpload();
+        isCompleted.value = true;
+        isUploading.value = false;
+        return result;
+      } else {
+        // 如果还有未完成的分片但没有在上传，可能是因为再次暂停
+        isUploading.value = false;
+        return null;
+      }
     } catch (error) {
       isUploading.value = false;
       throw error;
@@ -787,6 +885,16 @@ export function useS3Upload(options: S3UploadOptions = {}) {
     isUploading.value = false;
     isCalculatingHash.value = false;
     isCheckingUpload.value = false;
+
+    // 中止所有正在进行的分片上传
+    for (const chunk of chunks.value) {
+      if (chunk.abortController && !chunk.uploaded) {
+        chunk.abortController.abort();
+      }
+    }
+
+    // 清除执行中的分片记录
+    executingChunks.value.clear();
 
     if (uploadSession.value) {
       try {
@@ -824,6 +932,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
     chunks.value = [];
     uploadSession.value = null;
     resumeInfo.value = null;
+    executingChunks.value.clear(); // 清除执行中的分片记录
     uploadProgress.loaded = 0;
     uploadProgress.total = 0;
     uploadProgress.percentage = 0;
