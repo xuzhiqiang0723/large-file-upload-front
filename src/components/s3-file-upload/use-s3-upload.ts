@@ -66,7 +66,7 @@ interface S3NetworkStats {
 interface S3CheckUploadResponse {
   success: boolean
   fileExists: boolean
-  isComplete: boolean
+  complete: boolean
   shouldUpload?: boolean
   message: string
   url?: string
@@ -354,7 +354,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
 
       const result: S3CheckUploadResponse = await response.json()
 
-      if (result.fileExists && result.isComplete) {
+      if (result.fileExists && result.complete) {
         // S3秒传成功
         console.log('⚡ S3秒传成功！文件已存在')
         isSecondTransfer.value = true
@@ -808,7 +808,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
       // 检查上传状态
       const checkResult = await checkUploadStatus()
 
-      if (checkResult.fileExists && checkResult.isComplete) {
+      if (checkResult.fileExists && checkResult.complete) {
         // S3秒传成功
         isCompleted.value = true
         isUploading.value = false

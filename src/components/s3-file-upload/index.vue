@@ -33,7 +33,7 @@ const {
   reset
 } = useS3Upload({
   chunkSize: 5 * 1024 * 1024, // 5MB分片，适合S3
-  concurrent: 1, // 1个并发
+  concurrent: 3, // 3个并发
   retryTimes: 3,
   baseUrl: 'http://localhost:3000/api/s3/upload',
   headers: {},
