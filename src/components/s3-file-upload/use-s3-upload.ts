@@ -360,7 +360,7 @@ export function useS3Upload(options: S3UploadOptions = {}) {
         isSecondTransfer.value = true
         isCompleted.value = true
         return result
-      } else if (result.resumeInfo && result.shouldUpload) {
+      } else if (result.resumeInfo && result.resumeInfo.uploadedCount > 0 && result.shouldUpload) {
         // 发现断点续传会话
         console.log('🔄 发现S3断点续传会话', result)
         console.log(chunks.value, result.uploadedChunks)
